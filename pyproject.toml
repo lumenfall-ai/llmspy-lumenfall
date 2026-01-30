@@ -10,6 +10,7 @@ authors = [
     {name = "Lumenfall", email = "support@lumenfall.ai"}
 ]
 requires-python = ">=3.8"
+license = "BSD-3-Clause"
 dependencies = [
     "aiohttp>=3.9.0",
     "llms-py>=3.0.20"
