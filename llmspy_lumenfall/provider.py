@@ -55,6 +55,17 @@ class LumenfallProvider(OpenAiCompatible):
                 api_key=self.api_key,
             )
 
+    @staticmethod
+    def _messages_have_images(messages):
+        """Check if any message contains image_url content parts."""
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if part.get("type") == "image_url":
+                        return True
+        return False
+
     async def chat(self, chat, context=None):
         """Route chat requests, validating image-only models via /v1/models.
 
@@ -64,6 +75,14 @@ class LumenfallProvider(OpenAiCompatible):
         """
         # If modalities are specified, use normal dispatch (image generation)
         modalities = chat.get("modalities") or []
+
+        # When --image is used without --out image, modalities is empty but
+        # the message contains image_url parts. Detect this and route to
+        # the image generator so CLI editing works.
+        if not modalities and self._messages_have_images(chat.get("messages", [])):
+            chat["modalities"] = ["image"]
+            modalities = chat["modalities"]
+
         if len(modalities) > 0:
             return await super().chat(chat, context=context)
 

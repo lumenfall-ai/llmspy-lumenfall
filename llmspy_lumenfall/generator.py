@@ -10,6 +10,7 @@ Editing uses multipart/form-data POST to /images/edits.
 
 import base64
 import json
+import os
 import time
 
 import aiohttp
@@ -17,33 +18,104 @@ import aiohttp
 from llms.main import GeneratorBase
 
 
-def extract_user_images(chat):
-    """Extract image data from the last user message's content array.
+def _detect_media_type(raw):
+    """Detect image MIME type from magic bytes."""
+    if raw[:4] == b"\x89PNG":
+        return "image/png"
+    if raw[:2] == b"\xff\xd8":
+        return "image/jpeg"
+    if raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return "image/png"
 
-    In llmspy, user-provided images appear as content parts:
-        {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
 
-    Returns a list of (media_type, base64_data) tuples, or an empty list
-    if no images are found.
+def _read_local_file(file_path):
+    """Read a local image file from disk, return (media_type, b64_data) or None."""
+    if not os.path.isfile(file_path):
+        return None
+    with open(file_path, "rb") as f:
+        raw = f.read()
+    media_type = _detect_media_type(raw)
+    return (media_type, base64.b64encode(raw).decode())
+
+
+def _read_cache_file(cache_url):
+    """Read a /~cache/ file from disk, return (media_type, b64_data) or None."""
+    cache_dir = os.path.join(os.path.expanduser("~"), ".llms", "cache")
+    relative = cache_url[len("/~cache/"):]
+    file_path = os.path.join(cache_dir, relative)
+    return _read_local_file(file_path)
+
+
+def _extract_images_from_content(content_parts):
+    """Extract (media_type, b64_data) tuples from a list of content parts.
+
+    Handles data: URIs, /~cache/ paths, and absolute file paths.
     """
-    for msg in reversed(chat.get("messages", [])):
+    images = []
+    for part in content_parts:
+        if part.get("type") != "image_url":
+            continue
+        url = part.get("image_url", {}).get("url", "")
+        if url.startswith("data:"):
+            header, _, b64 = url.partition(",")
+            media_type = header.split(";")[0].replace("data:", "")
+            images.append((media_type, b64))
+        elif url.startswith("/~cache/"):
+            result = _read_cache_file(url)
+            if result:
+                images.append(result)
+        elif os.path.isabs(url):
+            result = _read_local_file(url)
+            if result:
+                images.append(result)
+    return images
+
+
+def extract_user_images(chat):
+    """Extract input images for editing from chat messages.
+
+    Collects images from two sources and combines them:
+    1. Last assistant output image (the result being iteratively edited)
+    2. User-attached images from the last user message (new images from input)
+
+    All collected images are returned together (assistant output first, then
+    user-attached). If no images are found from either source, returns an
+    empty list which routes to /images/generations.
+
+    Returns a list of (media_type, base64_data) tuples.
+    """
+    messages = chat.get("messages", [])
+
+    images = []
+
+    # 1. Last assistant output image (for conversational editing)
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant":
+            continue
+        assistant_images = msg.get("images") or []
+        if not assistant_images:
+            # Also check nested message dict
+            inner = msg.get("message", {})
+            assistant_images = inner.get("images") or []
+        if assistant_images:
+            extracted = _extract_images_from_content(assistant_images)
+            if extracted:
+                images.extend(extracted)
+        break  # only check the most recent assistant message
+
+    # 2. User-attached images from last user message
+    for msg in reversed(messages):
         if msg.get("role") != "user":
             continue
         content = msg.get("content")
-        if not isinstance(content, list):
-            break
-        images = []
-        for part in content:
-            if part.get("type") != "image_url":
-                continue
-            url = part.get("image_url", {}).get("url", "")
-            if url.startswith("data:"):
-                # Parse "data:image/png;base64,iVBOR..."
-                header, _, b64 = url.partition(",")
-                media_type = header.split(";")[0].replace("data:", "")
-                images.append((media_type, b64))
-        return images
-    return []
+        if isinstance(content, list):
+            extracted = _extract_images_from_content(content)
+            if extracted:
+                images.extend(extracted)
+        break  # only check the last user message
+
+    return images
 
 
 class LumenfallImageGenerator(GeneratorBase):
@@ -120,9 +192,6 @@ class LumenfallImageGenerator(GeneratorBase):
     ):
         """Image editing — multipart/form-data POST to /images/edits."""
         edit_url = self.api_base + "/images/edits"
-        self.ctx.log(
-            f"POST {edit_url} (multipart, {len(user_images)} image(s))"
-        )
 
         form = aiohttp.FormData()
         form.add_field("prompt", prompt)
@@ -130,27 +199,18 @@ class LumenfallImageGenerator(GeneratorBase):
         form.add_field("n", str(chat.get("n", 1)))
         form.add_field("response_format", "b64_json")
 
-        # First image is the source image (required)
-        media_type, b64_data = user_images[0]
-        ext = media_type.split("/")[-1] if "/" in media_type else "png"
-        form.add_field(
-            "image",
-            base64.b64decode(b64_data),
-            filename=f"image.{ext}",
-            content_type=media_type,
-        )
+        aspect_ratio = self.ctx.chat_to_aspect_ratio(chat) or "1:1"
+        form.add_field("aspect_ratio", aspect_ratio)
 
-        # Second image, if present, is the mask (optional, for inpainting)
-        if len(user_images) > 1:
-            mask_type, mask_b64 = user_images[1]
-            mask_ext = (
-                mask_type.split("/")[-1] if "/" in mask_type else "png"
-            )
+        # Send all images as image[] fields (array notation)
+        for i, (media_type, b64_data) in enumerate(user_images):
+            ext = media_type.split("/")[-1] if "/" in media_type else "png"
+            image_bytes = base64.b64decode(b64_data)
             form.add_field(
-                "mask",
-                base64.b64decode(mask_b64),
-                filename=f"mask.{mask_ext}",
-                content_type=mask_type,
+                "image[]",
+                image_bytes,
+                filename=f"image-{i}.{ext}",
+                content_type=media_type,
             )
 
         # Remove Content-Type so aiohttp can set the multipart boundary

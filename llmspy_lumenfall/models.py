@@ -12,6 +12,25 @@ _here = os.path.dirname(os.path.abspath(__file__))
 _static_path = os.path.join(_here, "models.json")
 _cache_path = None  # set by set_cache_dir()
 
+_DEFAULT_MODALITIES = {"input": ["text"], "output": ["image"]}
+
+
+def _load_static_modalities():
+    """Load modalities lookup from the static models.json shipped with the package."""
+    try:
+        with open(_static_path) as f:
+            data = json.load(f)
+        return {
+            m["id"]: m["modalities"]
+            for m in data.get("data", [])
+            if "modalities" in m
+        }
+    except (json.JSONDecodeError, OSError, KeyError):
+        return {}
+
+
+_static_modalities = _load_static_modalities()
+
 
 def set_cache_dir(cache_dir):
     """Set the directory for the cached models file."""
@@ -43,11 +62,23 @@ def save_models(api_response):
 
 
 def _parse_models(api_response):
-    """Convert API /v1/models response to {id: {id, name}} dict."""
+    """Convert API /v1/models response to {id: {id, name, modalities}} dict.
+
+    Modalities are resolved in priority order:
+    1. From the API response (future gateway support)
+    2. From the static models.json shipped with the package
+    3. Default: text input, image output
+    """
     models = {}
     for m in api_response.get("data", []):
-        models[m["id"]] = {
-            "id": m["id"],
-            "name": m.get("name", m["id"]),
+        mid = m["id"]
+        models[mid] = {
+            "id": mid,
+            "name": m.get("name", mid),
+            "modalities": (
+                m.get("modalities")
+                or _static_modalities.get(mid)
+                or _DEFAULT_MODALITIES
+            ),
         }
     return models
