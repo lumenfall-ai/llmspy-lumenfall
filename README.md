@@ -9,16 +9,17 @@ With the Lumenfall extension, you can access all of our image models inside llms
 ## Quick start
 
 ```bash
-llms --add lumenfall-ai/llmspy-lumenfall
+llms --add lumenfall
 export LUMENFALL_API_KEY=lmnfl_your_api_key
 ```
 
-Add the provider to `~/.llms/llms.json`:
+Optional: If you want to be able to turn the provider on and off in the web interface, add it to the `providers` section of `~/.llms/llms.json`:
 
 ```json
 {
   "providers": {
-    "lumenfall": { "enabled": true, "npm": "llmspy_lumenfall" }
+    "lumenfall": { "enabled": true, "npm": "llmspy_lumenfall" },
+    # ... any other providers
   }
 }
 ```
@@ -46,7 +47,7 @@ All image requests route through Lumenfall's unified API, which handles provider
 ### Via llms --add (recommended)
 
 ```bash
-llms --add lumenfall-ai/llmspy-lumenfall
+llms --add lumenfall
 ```
 
 This clones the extension into `~/.llms/extensions/` and installs Python dependencies automatically.
@@ -75,9 +76,9 @@ echo 'export LUMENFALL_API_KEY="lmnfl_your_api_key"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-### 2. Register the provider
+### 2. Register the provider (Optional)
 
-Add Lumenfall to the `providers` section of `~/.llms/llms.json`:
+If you want to be able to turn the provider on and off in the web interface, add it to the `providers` section of `~/.llms/llms.json`:
 
 ```json
 {
@@ -87,9 +88,13 @@ Add Lumenfall to the `providers` section of `~/.llms/llms.json`:
 }
 ```
 
-This step is required for the extension to work.
-
 ## Usage
+
+### List available models
+
+```bash
+llms --check lumenfall
+```
 
 ### Generate a single image
 
