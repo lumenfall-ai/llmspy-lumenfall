@@ -13,17 +13,6 @@ llms --add lumenfall
 export LUMENFALL_API_KEY=lmnfl_your_api_key
 ```
 
-Optional: If you want to be able to turn the provider on and off in the web interface, add it to the `providers` section of `~/.llms/llms.json`:
-
-```json
-{
-  "providers": {
-    "lumenfall": { "enabled": true, "npm": "llmspy_lumenfall" },
-    # ... any other providers
-  }
-}
-```
-
 Then generate an image:
 
 ```bash
@@ -80,10 +69,11 @@ source ~/.zshrc
 
 If you want to be able to turn the provider on and off in the web interface, add it to the `providers` section of `~/.llms/llms.json`:
 
-```json
+```jsonc
 {
   "providers": {
-    "lumenfall": { "enabled": true, "npm": "llmspy_lumenfall" }
+    "lumenfall": { "enabled": true, "npm": "llmspy_lumenfall" },
+    // ... any other providers
   }
 }
 ```
